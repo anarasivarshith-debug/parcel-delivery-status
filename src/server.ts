@@ -1,19 +1,38 @@
 
-import express, { Request, Response } from "express";
+import express, {
+  Request,
+  Response,
+  NextFunction
+} from "express";
 import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "../public")));
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
-interface ShipmentEvent {
+const DATA_DIR = path.join(__dirname, "..", "data");
+const DATA_FILE = path.join(DATA_DIR, "parcels.json");
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
+
+const STATUSES = [
+  "Booked",
+  "Order Placed",
+  "Picked Up",
+  "Shipped",
+  "In Transit",
+  "Out for Delivery",
+  "Delivered"
+] as const;
+
+interface HistoryEvent {
   status: string;
-  date: string;
-  time: string;
   description: string;
-  completed: boolean;
+  location: string;
+  date: string;
 }
 
 interface Parcel {
@@ -24,247 +43,280 @@ interface Parcel {
   destination: string;
   expectedDelivery: string;
   status: string;
-  history: ShipmentEvent[];
+  history: HistoryEvent[];
 }
 
-const milestones = [
-  "Order Placed",
-  "Booked",
-  "Picked Up",
-  "Shipped",
-  "In Transit",
-  "Out for Delivery",
-  "Delivered"
-];
+const sessions = new Set<string>();
 
-const descriptions: Record<string, string> = {
-  "Order Placed": "Order confirmed",
-  "Booked": "Parcel registered",
-  "Picked Up": "Collected from sender",
-  "Shipped": "Dispatched from facility",
-  "In Transit": "Moving to destination",
-  "Out for Delivery": "Courier is delivering the parcel",
-  "Delivered": "Parcel delivered successfully"
-};
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(PUBLIC_DIR));
 
-function event(
-  status: string,
-  date: string,
-  time: string,
-  completed: boolean
-): ShipmentEvent {
-  return {
-    status,
-    date: completed ? date : "",
-    time: completed ? time : "",
-    description: completed ? descriptions[status] : "Pending",
-    completed
-  };
-}
-
-const parcels: Parcel[] = [
-  {
-    trackingId: "PDS1001",
-    sender: "Online Store",
-    receiver: "Varshith",
-    origin: "Hyderabad",
-    destination: "Secunderabad",
-    expectedDelivery: "2026-10-29",
-    status: "In Transit",
-    history: [
-      event("Order Placed", "2026-10-24", "09:15 AM", true),
-      event("Booked", "2026-10-25", "10:30 AM", true),
-      event("Picked Up", "2026-10-25", "02:45 PM", true),
-      event("Shipped", "2026-10-26", "08:20 AM", true),
-      event("In Transit", "2026-10-27", "11:10 AM", true),
-      event("Out for Delivery", "", "", false),
-      event("Delivered", "", "", false)
-    ]
-  },
-  {
-    trackingId: "PDS1002",
-    sender: "Tech Store",
-    receiver: "Rahul",
-    origin: "Bengaluru",
-    destination: "Hyderabad",
-    expectedDelivery: "2026-10-28",
-    status: "Out for Delivery",
-    history: [
-      event("Order Placed", "2026-10-23", "08:45 AM", true),
-      event("Booked", "2026-10-24", "09:30 AM", true),
-      event("Picked Up", "2026-10-24", "01:15 PM", true),
-      event("Shipped", "2026-10-25", "07:50 AM", true),
-      event("In Transit", "2026-10-26", "04:20 PM", true),
-      event("Out for Delivery", "2026-10-27", "09:05 AM", true),
-      event("Delivered", "", "", false)
-    ]
-  },
-  {
-    trackingId: "PDS1003",
-    sender: "Book Store",
-    receiver: "Priya",
-    origin: "Chennai",
-    destination: "Hyderabad",
-    expectedDelivery: "2026-10-26",
-    status: "Delivered",
-    history: [
-      event("Order Placed", "2026-10-22", "10:00 AM", true),
-      event("Booked", "2026-10-23", "11:20 AM", true),
-      event("Picked Up", "2026-10-23", "03:10 PM", true),
-      event("Shipped", "2026-10-24", "08:40 AM", true),
-      event("In Transit", "2026-10-25", "02:30 PM", true),
-      event("Out for Delivery", "2026-10-26", "09:00 AM", true),
-      event("Delivered", "2026-10-26", "01:35 PM", true)
-    ]
-  },
-  {
-    trackingId: "PDS1004",
-    sender: "Fashion Hub",
-    receiver: "Sneha",
-    origin: "Mumbai",
-    destination: "Hyderabad",
-    expectedDelivery: "2026-10-30",
-    status: "In Transit",
-    history: [
-      event("Order Placed", "2026-10-24", "09:40 AM", true),
-      event("Booked", "2026-10-25", "10:10 AM", true),
-      event("Picked Up", "2026-10-25", "02:00 PM", true),
-      event("Shipped", "2026-10-26", "07:30 AM", true),
-      event("In Transit", "2026-10-27", "12:15 PM", true),
-      event("Out for Delivery", "", "", false),
-      event("Delivered", "", "", false)
-    ]
-  },
-  {
-    trackingId: "PDS1005",
-    sender: "Electronics Store",
-    receiver: "Arjun",
-    origin: "Delhi",
-    destination: "Bengaluru",
-    expectedDelivery: "2026-11-02",
-    status: "Shipped",
-    history: [
-      event("Order Placed", "2026-10-25", "08:30 AM", true),
-      event("Booked", "2026-10-26", "09:45 AM", true),
-      event("Picked Up", "2026-10-26", "01:20 PM", true),
-      event("Shipped", "2026-10-27", "07:15 AM", true),
-      event("In Transit", "", "", false),
-      event("Out for Delivery", "", "", false),
-      event("Delivered", "", "", false)
-    ]
+function ensureDataFile(): void {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-];
 
-function findParcel(trackingId: string): Parcel | undefined {
-  return parcels.find(
-    parcel => parcel.trackingId.toLowerCase() === trackingId.toLowerCase()
+  if (!fs.existsSync(DATA_FILE)) {
+    fs.writeFileSync(DATA_FILE, "[]", "utf8");
+  }
+}
+
+function readParcels(): Parcel[] {
+  ensureDataFile();
+
+  try {
+    const parsed: unknown = JSON.parse(
+      fs.readFileSync(DATA_FILE, "utf8")
+    );
+
+    return Array.isArray(parsed) ? parsed as Parcel[] : [];
+  } catch {
+    throw new Error("Could not read data/parcels.json.");
+  }
+}
+
+function writeParcels(parcels: Parcel[]): void {
+  ensureDataFile();
+
+  fs.writeFileSync(
+    DATA_FILE,
+    JSON.stringify(parcels, null, 2),
+    "utf8"
   );
 }
 
-function currentDateTime() {
-  const now = new Date();
-
-  const date = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(now);
-
-  const time = new Intl.DateTimeFormat("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true
-  }).format(now);
-
-  return { date, time };
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-// Get all parcels
-app.get("/api/parcels", (_req: Request, res: Response) => {
-  res.json(parcels);
-});
+function makeTrackingId(parcels: Parcel[]): string {
+  let id = "";
 
-// Track a parcel
-app.get("/api/parcels/:trackingId", (req: Request, res: Response) => {
-  const trackingId = String(req.params.trackingId);
-  const parcel = findParcel(trackingId);
+  do {
+    id = "PDS" + crypto.randomInt(1000, 10000);
+  } while (parcels.some(
+    parcel => parcel.trackingId === id
+  ));
 
-  if (!parcel) {
-    return res.status(404).json({
-      message: "Parcel not found. Please check your tracking ID."
+  return id;
+}
+
+function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  const token = text(req.header("x-admin-token"));
+
+  if (!token || !sessions.has(token)) {
+    res.status(401).json({
+      message: "Unauthorized. Please sign in again."
     });
+    return;
   }
 
-  return res.json(parcel);
-});
+  next();
+}
 
-// Update a parcel's status
-app.put(
-  "/api/parcels/:trackingId/status",
-  (req: Request, res: Response) => {
-    const trackingId = String(req.params.trackingId);
-    const parcel = findParcel(trackingId);
-    const status: unknown = req.body?.status;
-
-    if (!parcel) {
-      return res.status(404).json({
-        message: "Parcel not found."
-      });
-    }
+app.post(
+  "/api/admin/login",
+  (req: Request, res: Response): void => {
+    const username = text(req.body?.username);
+    const password = typeof req.body?.password === "string"
+      ? req.body.password
+      : "";
 
     if (
-      typeof status !== "string" ||
-      !milestones.includes(status) ||
-      status === "Order Placed"
+      username !== ADMIN_USERNAME ||
+      password !== ADMIN_PASSWORD
     ) {
-      return res.status(400).json({
-        message: "Please select a valid parcel status."
+      res.status(401).json({
+        message: "Invalid username or password."
       });
+      return;
     }
 
-    const { date, time } = currentDateTime();
-    const currentIndex = milestones.indexOf(status);
+    const token = crypto.randomBytes(32).toString("hex");
+    sessions.add(token);
 
-    // Update completed and pending milestones.
-    parcel.history = milestones.map((milestone, index) => {
-      const existing = parcel.history.find(
-        item => item.status === milestone
-      );
-
-      if (index <= currentIndex) {
-        if (milestone === status) {
-          return event(milestone, date, time, true);
-        }
-
-        if (existing?.completed) {
-          return { ...existing, completed: true };
-        }
-
-        // Sample timestamp for a newly completed earlier milestone.
-        return event(milestone, date, time, true);
-      }
-
-      return event(milestone, "", "", false);
-    });
-
-    parcel.status = status;
-
-    return res.json({
-      message: "Parcel status updated successfully.",
-      parcel
+    res.json({
+      message: "Login successful.",
+      authenticated: true,
+      token
     });
   }
 );
 
-// Serve the website
-app.use((_req: Request, res: Response) => {
-  res.sendFile(path.join(__dirname, "../public/index.html"));
+app.get(
+  "/api/admin/session",
+  requireAdmin,
+  (req: Request, res: Response): void => {
+    const token = text(req.header("x-admin-token"));
+
+    res.json({
+      authenticated: true,
+      token
+    });
+  }
+);
+
+app.post(
+  "/api/admin/logout",
+  requireAdmin,
+  (req: Request, res: Response): void => {
+    const token = text(req.header("x-admin-token"));
+    sessions.delete(token);
+
+    res.json({ message: "Signed out successfully." });
+  }
+);
+
+app.get(
+  "/api/parcels/:trackingId",
+  (req: Request, res: Response): void => {
+    const trackingId = text(req.params.trackingId);
+    const parcel = readParcels().find(
+      item => item.trackingId.toLowerCase() === trackingId.toLowerCase()
+    );
+
+    if (!parcel) {
+      res.status(404).json({
+        message: "Parcel not found. Check the tracking ID."
+      });
+      return;
+    }
+
+    res.json(parcel);
+  }
+);
+
+app.get(
+  "/api/parcels",
+  requireAdmin,
+  (_req: Request, res: Response): void => {
+    res.json(readParcels());
+  }
+);
+
+app.post(
+  "/api/parcels",
+  requireAdmin,
+  (req: Request, res: Response): void => {
+    const parcels = readParcels();
+
+    const sender = text(req.body?.sender);
+    const receiver = text(req.body?.receiver);
+    const origin = text(req.body?.origin);
+    const destination = text(req.body?.destination);
+    const expectedDelivery = text(req.body?.expectedDelivery);
+
+    if (
+      !sender ||
+      !receiver ||
+      !origin ||
+      !destination ||
+      !expectedDelivery
+    ) {
+      res.status(400).json({
+        message: "Please provide all required parcel fields."
+      });
+      return;
+    }
+
+    const date = new Date(expectedDelivery);
+
+    if (Number.isNaN(date.getTime())) {
+      res.status(400).json({
+        message: "Expected delivery date is invalid."
+      });
+      return;
+    }
+
+    const trackingId = makeTrackingId(parcels);
+    const now = new Date().toISOString();
+
+    const parcel: Parcel = {
+      trackingId,
+      sender,
+      receiver,
+      origin,
+      destination,
+      expectedDelivery: date.toISOString(),
+      status: "Booked",
+      history: [{
+        status: "Booked",
+        description: "Parcel booking created.",
+        location: origin,
+        date: now
+      }]
+    };
+
+    parcels.push(parcel);
+    writeParcels(parcels);
+
+    res.status(201).json(parcel);
+  }
+);
+
+app.put(
+  "/api/parcels/:trackingId/status",
+  requireAdmin,
+  (req: Request, res: Response): void => {
+    const parcels = readParcels();
+    const trackingId = text(req.params.trackingId);
+
+    const parcel = parcels.find(
+      item => item.trackingId.toLowerCase() === trackingId.toLowerCase()
+    );
+
+    if (!parcel) {
+      res.status(404).json({
+        message: "Parcel not found."
+      });
+      return;
+    }
+
+    const status = text(req.body?.status);
+    const location = text(req.body?.location);
+    const description = text(req.body?.description);
+
+    if (!(STATUSES as readonly string[]).includes(status)) {
+      res.status(400).json({
+        message: "Please select a valid parcel status."
+      });
+      return;
+    }
+
+    if (!location) {
+      res.status(400).json({
+        message: "Location is required."
+      });
+      return;
+    }
+
+    parcel.status = status;
+    parcel.history = Array.isArray(parcel.history)
+      ? parcel.history
+      : [];
+
+    parcel.history.push({
+      status,
+      description: description || "Parcel status updated.",
+      location,
+      date: new Date().toISOString()
+    });
+
+    writeParcels(parcels);
+    res.json(parcel);
+  }
+);
+
+app.get("/api/health", (_req: Request, res: Response): void => {
+  res.json({ status: "ok" });
 });
 
 app.listen(PORT, () => {
-  console.log(
-    `Parcel Delivery Status System running at http://localhost:${PORT}`
-  );
+  ensureDataFile();
+  console.log(`ParcelTrack is running at http://localhost:${PORT}`);
 });
