@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+<html lang="en" ng-app="parcelApp">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParcelTrack | Delivery Status</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+  <script src="app.js" defer></script>
+</head>
+
+<body ng-controller="ParcelController">
+  <header class="navbar">
+    <a class="logo" href="/">📦 ParcelTrack</a>
+    <span class="nav-label">DELIVERY STATUS SYSTEM</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">SMART PARCEL TRACKING</p>
+      <h1>Your parcel, <span>tracked simply.</span></h1>
+      <p class="subtitle">
+        Track your shipment and follow every delivery milestone.
+      </p>
+
+      <form class="tracking-form" ng-submit="trackParcel()">
+        <input
+          type="text"
+          ng-model="trackingId"
+          placeholder="Enter tracking ID (e.g. PDS1001)"
+          aria-label="Tracking ID"
+        >
+        <button type="submit">Track Parcel →</button>
+      </form>
+
+      <p class="hint">
+        Try PDS1001, PDS1002, PDS1003, PDS1004 or PDS1005
+      </p>
+    </section>
+
+    <section id="tracking" class="result-section">
+      <div class="message error" ng-if="errorMessage">
+        {{ errorMessage }}
+      </div>
+
+      <div class="message success" ng-if="successMessage">
+        {{ successMessage }}
+      </div>
+
+      <article class="parcel-card" ng-if="parcel">
+        <div class="parcel-heading">
+          <div>
+            <p class="eyebrow">TRACKING NUMBER</p>
+            <h2>{{ parcel.trackingId }}</h2>
+          </div>
+          <span class="status-badge"
+                ng-class="statusClass(parcel.status)">
+            {{ parcel.status }}
+          </span>
+        </div>
+
+        <div class="route">
+          <div class="route-point">
+            <span class="route-dot"></span>
+            <p class="muted">FROM</p>
+            <h3>{{ parcel.origin }}</h3>
+          </div>
+
+          <div class="route-line">✈ ──────────</div>
+
+          <div class="route-point destination">
+            <span class="route-dot"></span>
+            <p class="muted">TO</p>
+            <h3>{{ parcel.destination }}</h3>
+          </div>
+        </div>
+
+        <div class="details-grid">
+          <div>
+            <p class="muted">SENDER</p>
+            <strong>{{ parcel.sender }}</strong>
+          </div>
+          <div>
+            <p class="muted">RECEIVER</p>
+            <strong>{{ parcel.receiver }}</strong>
+          </div>
+          <div>
+            <p class="muted">EXPECTED DELIVERY</p>
+            <strong>{{ parcel.expectedDelivery }}</strong>
+          </div>
+        </div>
+
+        <div class="history">
+          <div class="history-heading">
+            <div>
+              <p class="eyebrow">DELIVERY PROGRESS</p>
+              <h3>Shipment History</h3>
+            </div>
+            <span class="progress-count">
+              {{ completedCount() }} of 7 stages
+            </span>
+          </div>
+
+          <div class="progress-track">
+            <div class="progress-fill"
+                 ng-style="{width: (completedCount() / 7 * 100) + '%'}">
+            </div>
+          </div>
+
+          <div class="history-list">
+            <div class="history-item"
+                 ng-repeat="item in parcel.history track by item.status"
+                 ng-class="{
+                   'pending-item': !item.completed,
+                   'active-item': item.status === parcel.status
+                                  && item.completed
+                 }">
+
+              <div class="timeline-marker">
+                <span class="history-dot"
+                      ng-class="{
+                        'pending-dot': !item.completed,
+                        'completed-dot': item.completed
+                      }">
+                  <span ng-if="item.completed">✓</span>
+                </span>
+              </div>
+
+              <div class="history-content">
+                <div class="history-title-row">
+                  <strong>{{ item.status }}</strong>
+
+                  <span class="current-badge"
+                        ng-if="item.status === parcel.status
+                               && item.completed">
+                    Current status
+                  </span>
+
+                  <span class="pending-badge" ng-if="!item.completed">
+                    Pending
+                  </span>
+                </div>
+
+                <p class="history-description">
+                  {{ item.description }}
+                </p>
+
+                <p class="history-date" ng-if="item.completed">
+                  <span>{{ item.date }}</span>
+                  <span class="date-separator">·</span>
+                  <span>{{ item.time }}</span>
+                </p>
+
+                <p class="history-date pending-date"
+                   ng-if="!item.completed">
+                  Awaiting this milestone
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <div class="empty-state" ng-if="!parcel && !errorMessage">
+        <div class="empty-icon">📦</div>
+        <h2>Ready to track your parcel?</h2>
+        <p>Enter your tracking ID above to see its delivery journey.</p>
+      </div>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-card">
+        <p class="eyebrow">DEMO ADMIN PANEL</p>
+        <h2>Update parcel status</h2>
+        <p class="subtitle">
+          Update a sample shipment and view its timeline.
+        </p>
+
+        <form ng-submit="updateStatus()">
+          <label for="adminTrackingId">Tracking ID</label>
+          <input
+            id="adminTrackingId"
+            type="text"
+            ng-model="adminTrackingId"
+            placeholder="e.g. PDS1001"
+          >
+
+          <label for="newStatus">New status</label>
+          <select id="newStatus" ng-model="newStatus">
+            <option value="">Select a status</option>
+            <option>Booked</option>
+            <option>Picked Up</option>
+            <option>Shipped</option>
+            <option>In Transit</option>
+            <option>Out for Delivery</option>
+            <option>Delivered</option>
+          </select>
+
+          <button type="submit" class="admin-button">
+            Update Status
+          </button>
+        </form>
+
+        <p class="admin-note">
+          Demo only: updates are stored in memory and reset when the server
+          restarts. This panel is not protected by login authentication.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>© 2026 ParcelTrack · Parcel Delivery Status System</p>
+    <p class="footer-subtitle">A parcel tracking demonstration project</p>
+  </footer>
+</body>
+</html>
